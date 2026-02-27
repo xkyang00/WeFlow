@@ -105,7 +105,8 @@ GET http://127.0.0.1:5031/api/v1/messages?talker=wxid_xxx&keyword=项目进度&l
       "senderUsername": "wxid_sender",
       "mediaType": "image",
       "mediaFileName": "image_123.jpg",
-      "mediaPath": "C:\\Users\\Alice\\Documents\\WeFlow\\api-media\\wxid_xxx\\images\\image_123.jpg"
+      "mediaUrl": "http://127.0.0.1:5031/api/v1/media/wxid_xxx/images/image_123.jpg",
+      "mediaLocalPath": "C:\\Users\\Alice\\Documents\\WeFlow\\api-media\\wxid_xxx\\images\\image_123.jpg"
     }
   ]
 }
@@ -140,7 +141,7 @@ GET http://127.0.0.1:5031/api/v1/messages?talker=wxid_xxx&keyword=项目进度&l
       "timestamp": 1738713600000,
       "type": 0,
       "content": "消息内容",
-      "mediaPath": "C:\\Users\\Alice\\Documents\\WeFlow\\api-media\\wxid_xxx\\images\\image_123.jpg"
+      "mediaPath": "http://127.0.0.1:5031/api/v1/media/wxid_xxx/images/image_123.jpg"
     }
   ],
   "media": {
@@ -153,7 +154,59 @@ GET http://127.0.0.1:5031/api/v1/messages?talker=wxid_xxx&keyword=项目进度&l
 
 ---
 
-### 3. 获取会话列表
+### 3. 访问导出媒体文件
+
+通过 HTTP 直接访问已导出的媒体文件（图片、语音、视频、表情）。
+
+**请求**
+```
+GET /api/v1/media/{relativePath}
+```
+
+**路径参数**
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|------|------|
+| `relativePath` | string | ✅ | 媒体文件的相对路径，如 `wxid_xxx/images/image_123.jpg` |
+
+**支持的媒体类型**
+
+| 扩展名 | Content-Type |
+|--------|-------------|
+| `.png` | image/png |
+| `.jpg` / `.jpeg` | image/jpeg |
+| `.gif` | image/gif |
+| `.webp` | image/webp |
+| `.wav` | audio/wav |
+| `.mp3` | audio/mpeg |
+| `.mp4` | video/mp4 |
+
+**示例请求**
+```bash
+# 访问导出的图片
+GET http://127.0.0.1:5031/api/v1/media/wxid_xxx/images/image_123.jpg
+
+# 访问导出的语音
+GET http://127.0.0.1:5031/api/v1/media/wxid_xxx/voices/voice_456.wav
+
+# 访问导出的视频
+GET http://127.0.0.1:5031/api/v1/media/wxid_xxx/videos/video_789.mp4
+```
+
+**响应**
+
+成功时直接返回文件内容，`Content-Type` 根据文件扩展名自动设置。
+
+失败时返回：
+```json
+{ "error": "Media not found" }
+```
+
+> 注意：媒体文件需要先通过消息接口的 `media=1` 参数导出后才能访问。
+
+---
+
+### 4. 获取会话列表
 
 获取所有会话列表。
 
