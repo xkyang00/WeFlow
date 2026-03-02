@@ -417,13 +417,13 @@ class SnsService {
             )
 
             let rows = primary.rows
-            if (!primary.success || !rows) {
+            if (!primary.success || !rows || rows.length === 0) {
                 const fallback = await wcdbService.execQuery(
                     'sns',
                     null,
                     "SELECT userName AS username, COUNT(1) AS total FROM SnsTimeLine WHERE userName IS NOT NULL AND userName <> '' GROUP BY userName"
                 )
-                if (!fallback.success || !fallback.rows) {
+                if (!fallback.success || !fallback.rows || fallback.rows.length === 0) {
                     return { success: false, error: primary.error || fallback.error || '获取朋友圈联系人条数失败' }
                 }
                 rows = fallback.rows
@@ -433,7 +433,11 @@ class SnsService {
                 const usernameRaw = row?.username ?? row?.user_name ?? row?.userName ?? ''
                 const username = typeof usernameRaw === 'string' ? usernameRaw.trim() : String(usernameRaw || '').trim()
                 if (!username) continue
-                counts[username] = this.parseCountValue(row)
+                const countRaw = row?.total ?? row?.count ?? row?.cnt
+                const parsedCount = Number(countRaw)
+                counts[username] = Number.isFinite(parsedCount) && parsedCount > 0
+                    ? Math.floor(parsedCount)
+                    : this.parseCountValue(row)
             }
             return { success: true, data: counts }
         } catch (e) {

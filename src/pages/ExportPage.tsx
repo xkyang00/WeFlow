@@ -2096,6 +2096,17 @@ function ExportPage() {
     void loadSessionDetail(sessionId)
   }, [loadSessionDetail])
 
+  useEffect(() => {
+    if (!showSessionDetailPanel) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowSessionDetailPanel(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [showSessionDetailPanel])
+
   const handleCopyDetailField = useCallback(async (text: string, field: string) => {
     try {
       await navigator.clipboard.writeText(text)
@@ -2581,7 +2592,7 @@ function ExportPage() {
           </div>
         )}
 
-        <div className={`session-table-layout ${showSessionDetailPanel ? 'with-detail' : ''}`}>
+        <div className="session-table-layout">
           <div className="table-wrap">
             {contactsList.length === 0 && contactsLoadIssue ? (
               <div className="load-issue-state">
@@ -2698,7 +2709,17 @@ function ExportPage() {
           </div>
 
           {showSessionDetailPanel && (
-            <aside className="export-session-detail-panel">
+            <div
+              className="export-session-detail-overlay"
+              onClick={() => setShowSessionDetailPanel(false)}
+            >
+              <aside
+                className="export-session-detail-panel"
+                role="dialog"
+                aria-modal="true"
+                aria-label="会话详情"
+                onClick={(event) => event.stopPropagation()}
+              >
               <div className="detail-header">
                 <h4>会话详情</h4>
                 <button className="close-btn" onClick={() => setShowSessionDetailPanel(false)}>
@@ -2884,7 +2905,8 @@ function ExportPage() {
               ) : (
                 <div className="detail-empty">暂无详情</div>
               )}
-            </aside>
+              </aside>
+            </div>
           )}
         </div>
       </div>

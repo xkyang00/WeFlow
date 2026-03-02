@@ -573,7 +573,6 @@
   display: flex;
   flex: 1;
   min-height: 0;
-  gap: 10px;
 
   .table-wrap {
     flex: 1;
@@ -1015,15 +1014,25 @@
   }
 }
 
+.export-session-detail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(15, 23, 42, 0.24);
+}
+
 .export-session-detail-panel {
-  width: 300px;
-  min-width: 300px;
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
+  width: min(360px, calc(100vw - 16px));
+  height: 100vh;
+  border-left: 1px solid var(--border-color);
+  border-radius: 0;
   background: var(--card-bg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  box-shadow: -12px 0 30px rgba(0, 0, 0, 0.18);
 
   .detail-header {
     display: flex;
@@ -1615,16 +1624,6 @@
   .media-check-grid {
     grid-template-columns: repeat(2, minmax(120px, 1fr));
   }
-
-  .session-table-layout.with-detail {
-    flex-direction: column;
-  }
-
-  .export-session-detail-panel {
-    width: 100%;
-    min-width: 0;
-    max-height: 360px;
-  }
 }
 
 @media (max-width: 720px) {
@@ -1647,6 +1646,6 @@
   }
 
   .export-session-detail-panel {
-    max-height: 320px;
+    width: calc(100vw - 12px);
   }
 }
