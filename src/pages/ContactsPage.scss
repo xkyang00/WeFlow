@@ -148,6 +148,17 @@
       svg {
         opacity: 0.7;
         transition: transform 0.2s;
+        flex-shrink: 0;
+      }
+
+      .chip-label {
+        min-width: 0;
+      }
+
+      .chip-count {
+        margin-left: auto;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
       }
 
       &:hover {

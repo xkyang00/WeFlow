@@ -762,109 +762,71 @@ class ChatService {
   }
 
   /**
-   * 获取导出页会话分类数量（轻量接口，优先用于顶部 Tab 数量展示）
+   * 获取联系人类型数量（好友、群聊、公众号、曾经的好友）
    */
-  async getExportTabCounts(): Promise<{ success: boolean; counts?: ExportTabCounts; error?: string }> {
+  async getContactTypeCounts(): Promise<{ success: boolean; counts?: ExportTabCounts; error?: string }> {
     try {
       const connectResult = await this.ensureConnected()
       if (!connectResult.success) {
         return { success: false, error: connectResult.error }
       }
 
-      const sessionResult = await wcdbService.getSessions()
-      if (!sessionResult.success || !sessionResult.sessions) {
-        return { success: false, error: sessionResult.error || '获取会话失败' }
+      const excludeExpr = Array.from(FRIEND_EXCLUDE_USERNAMES)
+        .map((username) => `'${this.escapeSqlString(username)}'`)
+        .join(',')
+
+      const countsSql = `
+        SELECT
+          SUM(CASE WHEN username LIKE '%@chatroom' THEN 1 ELSE 0 END) AS group_count,
+          SUM(CASE WHEN username LIKE 'gh_%' THEN 1 ELSE 0 END) AS official_count,
+          SUM(
+            CASE
+              WHEN username NOT LIKE '%@chatroom'
+                AND username NOT LIKE 'gh_%'
+                AND local_type = 1
+                AND username NOT IN (${excludeExpr})
+              THEN 1 ELSE 0
+            END
+          ) AS private_count,
+          SUM(
+            CASE
+              WHEN username NOT LIKE '%@chatroom'
+                AND username NOT LIKE 'gh_%'
+                AND local_type = 0
+                AND COALESCE(quan_pin, '') != ''
+              THEN 1 ELSE 0
+            END
+          ) AS former_friend_count
+        FROM contact
+        WHERE username IS NOT NULL
+          AND username != ''
+      `
+
+      const result = await wcdbService.execQuery('contact', null, countsSql)
+      if (!result.success || !result.rows || result.rows.length === 0) {
+        return { success: false, error: result.error || '获取联系人类型数量失败' }
       }
 
+      const row = result.rows[0] as Record<string, any>
       const counts: ExportTabCounts = {
-        private: 0,
-        group: 0,
-        official: 0,
-        former_friend: 0
-      }
-
-      const nonGroupUsernames: string[] = []
-      const usernameSet = new Set<string>()
-
-      for (const row of sessionResult.sessions as Record<string, any>[]) {
-        const username =
-          row.username ||
-          row.user_name ||
-          row.userName ||
-          row.usrName ||
-          row.UsrName ||
-          row.talker ||
-          row.talker_id ||
-          row.talkerId ||
-          ''
-
-        if (!this.shouldKeepSession(username)) continue
-        if (usernameSet.has(username)) continue
-        usernameSet.add(username)
-
-        if (username.endsWith('@chatroom')) {
-          counts.group += 1
-        } else {
-          nonGroupUsernames.push(username)
-        }
-      }
-
-      if (nonGroupUsernames.length === 0) {
-        return { success: true, counts }
-      }
-
-      const contactTypeMap = new Map<string, 'official' | 'former_friend'>()
-      const chunkSize = 400
-
-      for (let i = 0; i < nonGroupUsernames.length; i += chunkSize) {
-        const chunk = nonGroupUsernames.slice(i, i + chunkSize)
-        if (chunk.length === 0) continue
-
-        const usernamesExpr = chunk.map((name) => `'${this.escapeSqlString(name)}'`).join(',')
-        const contactSql = `
-          SELECT username, local_type, quan_pin
-          FROM contact
-          WHERE username IN (${usernamesExpr})
-        `
-
-        const contactResult = await wcdbService.execQuery('contact', null, contactSql)
-        if (!contactResult.success || !contactResult.rows) {
-          continue
-        }
-
-        for (const row of contactResult.rows as Record<string, any>[]) {
-          const username = String(row.username || '').trim()
-          if (!username) continue
-
-          if (username.startsWith('gh_')) {
-            contactTypeMap.set(username, 'official')
-            continue
-          }
-
-          const localType = this.getRowInt(row, ['local_type', 'localType', 'WCDB_CT_local_type'], 0)
-          const quanPin = String(this.getRowField(row, ['quan_pin', 'quanPin', 'WCDB_CT_quan_pin']) || '').trim()
-          if (localType === 0 && quanPin) {
-            contactTypeMap.set(username, 'former_friend')
-          }
-        }
-      }
-
-      for (const username of nonGroupUsernames) {
-        const type = contactTypeMap.get(username)
-        if (type === 'official') {
-          counts.official += 1
-        } else if (type === 'former_friend') {
-          counts.former_friend += 1
-        } else {
-          counts.private += 1
-        }
+        private: this.getRowInt(row, ['private_count', 'privateCount'], 0),
+        group: this.getRowInt(row, ['group_count', 'groupCount'], 0),
+        official: this.getRowInt(row, ['official_count', 'officialCount'], 0),
+        former_friend: this.getRowInt(row, ['former_friend_count', 'formerFriendCount'], 0)
       }
 
       return { success: true, counts }
     } catch (e) {
-      console.error('ChatService: 获取导出页会话分类数量失败:', e)
+      console.error('ChatService: 获取联系人类型数量失败:', e)
       return { success: false, error: String(e) }
     }
+  }
+
+  /**
+   * 获取导出页会话分类数量（轻量接口，优先用于顶部 Tab 数量展示）
+   */
+  async getExportTabCounts(): Promise<{ success: boolean; counts?: ExportTabCounts; error?: string }> {
+    return this.getContactTypeCounts()
   }
 
   /**

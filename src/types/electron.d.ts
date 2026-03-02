@@ -89,6 +89,16 @@ export interface ElectronAPI {
       }
       error?: string
     }>
+    getContactTypeCounts: () => Promise<{
+      success: boolean
+      counts?: {
+        private: number
+        group: number
+        official: number
+        former_friend: number
+      }
+      error?: string
+    }>
     getSessionMessageCounts: (sessionIds: string[]) => Promise<{
       success: boolean
       counts?: Record<string, number>

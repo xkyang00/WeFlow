@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, type UIEvent } from 
 import { useNavigate } from 'react-router-dom'
 import { Search, RefreshCw, X, User, Users, MessageSquare, Loader2, FolderOpen, Download, ChevronDown, MessageCircle, UserX } from 'lucide-react'
 import { useChatStore } from '../stores/chatStore'
+import { toContactTypeCardCounts, useContactTypeCountsStore } from '../stores/contactTypeCountsStore'
 import './ContactsPage.scss'
 
 interface ContactInfo {
@@ -58,6 +59,8 @@ function ContactsPage() {
     })
     const [scrollTop, setScrollTop] = useState(0)
     const [listViewportHeight, setListViewportHeight] = useState(480)
+    const sharedTabCounts = useContactTypeCountsStore(state => state.tabCounts)
+    const syncContactTypeCounts = useContactTypeCountsStore(state => state.syncFromContacts)
 
     const applyEnrichedContacts = useCallback((enrichedMap: Record<string, ContactEnrichInfo>) => {
         if (!enrichedMap || Object.keys(enrichedMap).length === 0) return
@@ -151,6 +154,7 @@ function ContactsPage() {
             if (loadVersionRef.current !== loadVersion) return
             if (contactsResult.success && contactsResult.contacts) {
                 setContacts(contactsResult.contacts)
+                syncContactTypeCounts(contactsResult.contacts)
                 setSelectedUsernames(new Set())
                 setSelectedContact(prev => {
                     if (!prev) return prev
@@ -167,7 +171,7 @@ function ContactsPage() {
                 setIsLoading(false)
             }
         }
-    }, [enrichContactsInBackground])
+    }, [enrichContactsInBackground, syncContactTypeCounts])
 
     useEffect(() => {
         loadContacts()
@@ -205,6 +209,8 @@ function ContactsPage() {
 
         return filtered
     }, [contacts, contactTypes, debouncedSearchKeyword])
+
+    const contactTypeCounts = useMemo(() => toContactTypeCardCounts(sharedTabCounts), [sharedTabCounts])
 
     useEffect(() => {
         if (!listRef.current) return
@@ -428,19 +434,27 @@ function ContactsPage() {
                 <div className="type-filters">
                     <label className={`filter-chip ${contactTypes.friends ? 'active' : ''}`}>
                         <input type="checkbox" checked={contactTypes.friends} onChange={e => setContactTypes({ ...contactTypes, friends: e.target.checked })} />
-                        <User size={16} /><span>好友</span>
+                        <User size={16} />
+                        <span className="chip-label">好友</span>
+                        <span className="chip-count">{contactTypeCounts.friends}</span>
                     </label>
                     <label className={`filter-chip ${contactTypes.groups ? 'active' : ''}`}>
                         <input type="checkbox" checked={contactTypes.groups} onChange={e => setContactTypes({ ...contactTypes, groups: e.target.checked })} />
-                        <Users size={16} /><span>群聊</span>
+                        <Users size={16} />
+                        <span className="chip-label">群聊</span>
+                        <span className="chip-count">{contactTypeCounts.groups}</span>
                     </label>
                     <label className={`filter-chip ${contactTypes.officials ? 'active' : ''}`}>
                         <input type="checkbox" checked={contactTypes.officials} onChange={e => setContactTypes({ ...contactTypes, officials: e.target.checked })} />
-                        <MessageSquare size={16} /><span>公众号</span>
+                        <MessageSquare size={16} />
+                        <span className="chip-label">公众号</span>
+                        <span className="chip-count">{contactTypeCounts.officials}</span>
                     </label>
                     <label className={`filter-chip ${contactTypes.deletedFriends ? 'active' : ''}`}>
                         <input type="checkbox" checked={contactTypes.deletedFriends} onChange={e => setContactTypes({ ...contactTypes, deletedFriends: e.target.checked })} />
-                        <UserX size={16} /><span>曾经的好友</span>
+                        <UserX size={16} />
+                        <span className="chip-label">曾经的好友</span>
+                        <span className="chip-count">{contactTypeCounts.deletedFriends}</span>
                     </label>
                 </div>
 

@@ -22,6 +22,7 @@ import {
 import type { ChatSession as AppChatSession, ContactInfo } from '../types/models'
 import type { ExportOptions as ElectronExportOptions, ExportProgress } from '../types/electron'
 import * as configService from '../services/config'
+import { useContactTypeCountsStore } from '../stores/contactTypeCountsStore'
 import './ExportPage.scss'
 
 type ConversationTab = 'private' | 'group' | 'official' | 'former_friend'
@@ -321,12 +322,10 @@ function ExportPage() {
 
   const [isLoading, setIsLoading] = useState(true)
   const [isSessionEnriching, setIsSessionEnriching] = useState(false)
-  const [isTabCountsLoading, setIsTabCountsLoading] = useState(true)
   const [isSnsStatsLoading, setIsSnsStatsLoading] = useState(true)
   const [isBaseConfigLoading, setIsBaseConfigLoading] = useState(true)
   const [isTaskCenterExpanded, setIsTaskCenterExpanded] = useState(false)
   const [sessions, setSessions] = useState<SessionRow[]>([])
-  const [prefetchedTabCounts, setPrefetchedTabCounts] = useState<Record<ConversationTab, number> | null>(null)
   const [sessionMessageCounts, setSessionMessageCounts] = useState<Record<string, number>>({})
   const [sessionMetrics, setSessionMetrics] = useState<Record<string, SessionMetrics>>({})
   const [searchKeyword, setSearchKeyword] = useState('')
@@ -374,6 +373,11 @@ function ExportPage() {
   })
   const [hasSeededSnsStats, setHasSeededSnsStats] = useState(false)
   const [nowTick, setNowTick] = useState(Date.now())
+  const tabCounts = useContactTypeCountsStore(state => state.tabCounts)
+  const isSharedTabCountsLoading = useContactTypeCountsStore(state => state.isLoading)
+  const isSharedTabCountsReady = useContactTypeCountsStore(state => state.isReady)
+  const ensureSharedTabCountsLoaded = useContactTypeCountsStore(state => state.ensureLoaded)
+  const syncContactTypeCounts = useContactTypeCountsStore(state => state.syncFromContacts)
 
   const progressUnsubscribeRef = useRef<(() => void) | null>(null)
   const runningTaskIdRef = useRef<string | null>(null)
@@ -516,20 +520,6 @@ function ExportPage() {
     }
   }, [])
 
-  const loadTabCounts = useCallback(async () => {
-    setIsTabCountsLoading(true)
-    try {
-      const result = await window.electronAPI.chat.getExportTabCounts()
-      if (result.success && result.counts) {
-        setPrefetchedTabCounts(result.counts)
-      }
-    } catch (error) {
-      console.error('加载导出页会话分类数量失败:', error)
-    } finally {
-      setIsTabCountsLoading(false)
-    }
-  }, [])
-
   const loadSnsStats = useCallback(async (options?: { full?: boolean; silent?: boolean }) => {
     if (!options?.silent) {
       setIsSnsStatsLoading(true)
@@ -641,6 +631,9 @@ function ExportPage() {
             if (isStale()) return
 
             const contacts: ContactInfo[] = contactsResult?.success && contactsResult.contacts ? contactsResult.contacts : []
+            if (contacts.length > 0) {
+              syncContactTypeCounts(contacts)
+            }
             const nextContactMap = contacts.reduce<Record<string, ContactInfo>>((map, contact) => {
               map[contact.username] = contact
               return map
@@ -694,11 +687,11 @@ function ExportPage() {
     } finally {
       if (!isStale()) setIsLoading(false)
     }
-  }, [])
+  }, [syncContactTypeCounts])
 
   useEffect(() => {
     void loadBaseConfig()
-    void loadTabCounts()
+    void ensureSharedTabCountsLoaded()
     void loadSessions()
 
     // 朋友圈统计延后一点加载，避免与首屏会话初始化抢占。
@@ -707,7 +700,7 @@ function ExportPage() {
     }, 120)
 
     return () => window.clearTimeout(timer)
-  }, [loadTabCounts, loadBaseConfig, loadSessions, loadSnsStats])
+  }, [ensureSharedTabCountsLoaded, loadBaseConfig, loadSessions, loadSnsStats])
 
   useEffect(() => {
     preselectAppliedRef.current = false
@@ -1363,29 +1356,6 @@ function ExportPage() {
     return set
   }, [tasks])
 
-  const sessionTabCounts = useMemo(() => {
-    const counts: Record<ConversationTab, number> = {
-      private: 0,
-      group: 0,
-      official: 0,
-      former_friend: 0
-    }
-    for (const session of sessions) {
-      counts[session.kind] += 1
-    }
-    return counts
-  }, [sessions])
-
-  const tabCounts = useMemo(() => {
-    if (sessions.length > 0) {
-      return sessionTabCounts
-    }
-    if (prefetchedTabCounts) {
-      return prefetchedTabCounts
-    }
-    return sessionTabCounts
-  }, [sessions.length, sessionTabCounts, prefetchedTabCounts])
-
   const contentCards = useMemo(() => {
     const scopeSessions = sessions.filter(session => session.kind === 'private' || session.kind === 'group')
     const totalSessions = scopeSessions.length
@@ -1617,8 +1587,7 @@ function ExportPage() {
   const formatCandidateOptions = exportDialog.scope === 'sns'
     ? formatOptions.filter(option => option.value === 'html' || option.value === 'json')
     : formatOptions
-  const hasTabCountsSource = prefetchedTabCounts !== null || sessions.length > 0
-  const isTabCountComputing = isTabCountsLoading && !hasTabCountsSource
+  const isTabCountComputing = isSharedTabCountsLoading && !isSharedTabCountsReady
   const isSessionCardStatsLoading = isLoading || isBaseConfigLoading
   const isSnsCardStatsLoading = !hasSeededSnsStats
   const taskRunningCount = tasks.filter(task => task.status === 'running').length
