@@ -2279,7 +2279,55 @@ class ChatService {
     return list
   }
 
-  private async collectSessionExportStats(
+  private async getSessionMessageTables(sessionId: string): Promise<Array<{ tableName: string; dbPath: string }>> {
+    const cached = this.sessionTablesCache.get(sessionId)
+    if (cached && cached.length > 0) {
+      return cached
+    }
+
+    const tableStats = await wcdbService.getMessageTableStats(sessionId)
+    if (!tableStats.success || !tableStats.tables || tableStats.tables.length === 0) {
+      return []
+    }
+
+    const tables = tableStats.tables
+      .map(t => ({ tableName: t.table_name || t.name, dbPath: t.db_path }))
+      .filter(t => t.tableName && t.dbPath) as Array<{ tableName: string; dbPath: string }>
+
+    if (tables.length > 0) {
+      this.sessionTablesCache.set(sessionId, tables)
+      setTimeout(() => { this.sessionTablesCache.delete(sessionId) }, this.sessionTablesCacheTtl)
+    }
+    return tables
+  }
+
+  private async getMessageTableColumns(dbPath: string, tableName: string): Promise<Set<string>> {
+    const pragmaSql = `PRAGMA table_info(${this.quoteSqlIdentifier(tableName)})`
+    const result = await wcdbService.execQuery('message', dbPath, pragmaSql)
+    if (!result.success || !result.rows || result.rows.length === 0) {
+      return new Set<string>()
+    }
+    const columns = new Set<string>()
+    for (const row of result.rows as Record<string, any>[]) {
+      const name = String(this.getRowField(row, ['name', 'column_name', 'columnName']) || '').trim().toLowerCase()
+      if (name) columns.add(name)
+    }
+    return columns
+  }
+
+  private pickFirstColumn(columns: Set<string>, candidates: string[]): string | undefined {
+    for (const candidate of candidates) {
+      const normalized = candidate.toLowerCase()
+      if (columns.has(normalized)) return normalized
+    }
+    return undefined
+  }
+
+  private escapeSqlLiteral(value: string): string {
+    return String(value || '').replace(/'/g, "''")
+  }
+
+  private async collectSessionExportStatsByCursorScan(
     sessionId: string,
     selfIdentitySet: Set<string>
   ): Promise<ExportSessionStats> {
@@ -2359,6 +2407,147 @@ class ChatService {
     }
 
     if (sessionId.endsWith('@chatroom')) {
+      stats.groupActiveSpeakers = senderIdentities.size
+      if (Number.isFinite(stats.groupMyMessages)) {
+        this.setGroupMyMessageCountHintEntry(sessionId, stats.groupMyMessages as number)
+      }
+    }
+    return stats
+  }
+
+  private async collectSessionExportStats(
+    sessionId: string,
+    selfIdentitySet: Set<string>
+  ): Promise<ExportSessionStats> {
+    const stats: ExportSessionStats = {
+      totalMessages: 0,
+      voiceMessages: 0,
+      imageMessages: 0,
+      videoMessages: 0,
+      emojiMessages: 0
+    }
+    if (sessionId.endsWith('@chatroom')) {
+      stats.groupMyMessages = 0
+      stats.groupActiveSpeakers = 0
+    }
+
+    const tables = await this.getSessionMessageTables(sessionId)
+    if (tables.length === 0) {
+      return stats
+    }
+
+    const senderIdentities = new Set<string>()
+    let aggregatedTableCount = 0
+    const isGroup = sessionId.endsWith('@chatroom')
+    const escapedSelfKeys = Array.from(selfIdentitySet)
+      .filter(Boolean)
+      .map((key) => `'${this.escapeSqlLiteral(key.toLowerCase())}'`)
+
+    for (const { tableName, dbPath } of tables) {
+      const columnSet = await this.getMessageTableColumns(dbPath, tableName)
+      if (columnSet.size === 0) continue
+
+      const typeCol = this.pickFirstColumn(columnSet, ['local_type', 'type', 'msg_type', 'msgtype'])
+      const timeCol = this.pickFirstColumn(columnSet, ['create_time', 'createtime', 'msg_create_time', 'time'])
+      const senderCol = this.pickFirstColumn(columnSet, ['sender_username', 'senderusername', 'sender'])
+      const isSendCol = this.pickFirstColumn(columnSet, ['computed_is_send', 'computedissend', 'is_send', 'issend'])
+
+      const selectParts: string[] = [
+        'COUNT(*) AS total_messages',
+        typeCol ? `SUM(CASE WHEN ${this.quoteSqlIdentifier(typeCol)} = 34 THEN 1 ELSE 0 END) AS voice_messages` : '0 AS voice_messages',
+        typeCol ? `SUM(CASE WHEN ${this.quoteSqlIdentifier(typeCol)} = 3 THEN 1 ELSE 0 END) AS image_messages` : '0 AS image_messages',
+        typeCol ? `SUM(CASE WHEN ${this.quoteSqlIdentifier(typeCol)} = 43 THEN 1 ELSE 0 END) AS video_messages` : '0 AS video_messages',
+        typeCol ? `SUM(CASE WHEN ${this.quoteSqlIdentifier(typeCol)} = 47 THEN 1 ELSE 0 END) AS emoji_messages` : '0 AS emoji_messages',
+        timeCol ? `MIN(${this.quoteSqlIdentifier(timeCol)}) AS first_timestamp` : 'NULL AS first_timestamp',
+        timeCol ? `MAX(${this.quoteSqlIdentifier(timeCol)}) AS last_timestamp` : 'NULL AS last_timestamp'
+      ]
+
+      if (isGroup) {
+        if (senderCol) {
+          const normalizedSender = `LOWER(TRIM(CAST(${this.quoteSqlIdentifier(senderCol)} AS TEXT)))`
+          if (escapedSelfKeys.length > 0 && isSendCol) {
+            selectParts.push(
+              `SUM(CASE WHEN ${normalizedSender} != '' THEN CASE WHEN ${normalizedSender} IN (${escapedSelfKeys.join(', ')}) THEN 1 ELSE 0 END ELSE CASE WHEN ${this.quoteSqlIdentifier(isSendCol)} = 1 THEN 1 ELSE 0 END END) AS group_my_messages`
+            )
+          } else if (escapedSelfKeys.length > 0) {
+            selectParts.push(`SUM(CASE WHEN ${normalizedSender} IN (${escapedSelfKeys.join(', ')}) THEN 1 ELSE 0 END) AS group_my_messages`)
+          } else if (isSendCol) {
+            selectParts.push(`SUM(CASE WHEN ${this.quoteSqlIdentifier(isSendCol)} = 1 THEN 1 ELSE 0 END) AS group_my_messages`)
+          } else {
+            selectParts.push('0 AS group_my_messages')
+          }
+        } else if (isSendCol) {
+          selectParts.push(`SUM(CASE WHEN ${this.quoteSqlIdentifier(isSendCol)} = 1 THEN 1 ELSE 0 END) AS group_my_messages`)
+        } else {
+          selectParts.push('0 AS group_my_messages')
+        }
+
+        const aggregateSql = `SELECT ${selectParts.join(', ')} FROM ${this.quoteSqlIdentifier(tableName)}`
+        const aggregateResult = await wcdbService.execQuery('message', dbPath, aggregateSql)
+        if (!aggregateResult.success || !aggregateResult.rows || aggregateResult.rows.length === 0) {
+          continue
+        }
+
+        const aggregateRow = aggregateResult.rows[0] as Record<string, any>
+        aggregatedTableCount += 1
+        stats.totalMessages += this.getRowInt(aggregateRow, ['total_messages', 'totalMessages'], 0)
+        stats.voiceMessages += this.getRowInt(aggregateRow, ['voice_messages', 'voiceMessages'], 0)
+        stats.imageMessages += this.getRowInt(aggregateRow, ['image_messages', 'imageMessages'], 0)
+        stats.videoMessages += this.getRowInt(aggregateRow, ['video_messages', 'videoMessages'], 0)
+        stats.emojiMessages += this.getRowInt(aggregateRow, ['emoji_messages', 'emojiMessages'], 0)
+
+        const firstTs = this.getRowInt(aggregateRow, ['first_timestamp', 'firstTimestamp'], 0)
+        if (firstTs > 0 && (stats.firstTimestamp === undefined || firstTs < stats.firstTimestamp)) {
+          stats.firstTimestamp = firstTs
+        }
+        const lastTs = this.getRowInt(aggregateRow, ['last_timestamp', 'lastTimestamp'], 0)
+        if (lastTs > 0 && (stats.lastTimestamp === undefined || lastTs > stats.lastTimestamp)) {
+          stats.lastTimestamp = lastTs
+        }
+        stats.groupMyMessages = (stats.groupMyMessages || 0) + this.getRowInt(aggregateRow, ['group_my_messages', 'groupMyMessages'], 0)
+
+        if (senderCol) {
+          const normalizedSender = `LOWER(TRIM(CAST(${this.quoteSqlIdentifier(senderCol)} AS TEXT)))`
+          const distinctSenderSql = `SELECT DISTINCT ${normalizedSender} AS sender_identity FROM ${this.quoteSqlIdentifier(tableName)} WHERE ${normalizedSender} != ''`
+          const senderResult = await wcdbService.execQuery('message', dbPath, distinctSenderSql)
+          if (senderResult.success && senderResult.rows) {
+            for (const row of senderResult.rows as Record<string, any>[]) {
+              const senderIdentity = String(this.getRowField(row, ['sender_identity', 'senderIdentity']) || '').trim()
+              if (!senderIdentity) continue
+              senderIdentities.add(senderIdentity)
+            }
+          }
+        }
+      } else {
+        const aggregateSql = `SELECT ${selectParts.join(', ')} FROM ${this.quoteSqlIdentifier(tableName)}`
+        const aggregateResult = await wcdbService.execQuery('message', dbPath, aggregateSql)
+        if (!aggregateResult.success || !aggregateResult.rows || aggregateResult.rows.length === 0) {
+          continue
+        }
+        const aggregateRow = aggregateResult.rows[0] as Record<string, any>
+        aggregatedTableCount += 1
+        stats.totalMessages += this.getRowInt(aggregateRow, ['total_messages', 'totalMessages'], 0)
+        stats.voiceMessages += this.getRowInt(aggregateRow, ['voice_messages', 'voiceMessages'], 0)
+        stats.imageMessages += this.getRowInt(aggregateRow, ['image_messages', 'imageMessages'], 0)
+        stats.videoMessages += this.getRowInt(aggregateRow, ['video_messages', 'videoMessages'], 0)
+        stats.emojiMessages += this.getRowInt(aggregateRow, ['emoji_messages', 'emojiMessages'], 0)
+
+        const firstTs = this.getRowInt(aggregateRow, ['first_timestamp', 'firstTimestamp'], 0)
+        if (firstTs > 0 && (stats.firstTimestamp === undefined || firstTs < stats.firstTimestamp)) {
+          stats.firstTimestamp = firstTs
+        }
+        const lastTs = this.getRowInt(aggregateRow, ['last_timestamp', 'lastTimestamp'], 0)
+        if (lastTs > 0 && (stats.lastTimestamp === undefined || lastTs > stats.lastTimestamp)) {
+          stats.lastTimestamp = lastTs
+        }
+      }
+    }
+
+    if (aggregatedTableCount === 0) {
+      return this.collectSessionExportStatsByCursorScan(sessionId, selfIdentitySet)
+    }
+
+    if (isGroup) {
       stats.groupActiveSpeakers = senderIdentities.size
       if (Number.isFinite(stats.groupMyMessages)) {
         this.setGroupMyMessageCountHintEntry(sessionId, stats.groupMyMessages as number)
@@ -2490,6 +2679,89 @@ class ChatService {
     }
 
     return stats
+  }
+
+  private async computeSessionExportStatsBatch(
+    sessionIds: string[],
+    includeRelations: boolean,
+    selfIdentitySet: Set<string>
+  ): Promise<Record<string, ExportSessionStats>> {
+    const normalizedSessionIds = Array.from(
+      new Set(
+        (sessionIds || [])
+          .map((id) => String(id || '').trim())
+          .filter(Boolean)
+      )
+    )
+    const result: Record<string, ExportSessionStats> = {}
+    if (normalizedSessionIds.length === 0) {
+      return result
+    }
+
+    const groupSessionIds = normalizedSessionIds.filter(sessionId => sessionId.endsWith('@chatroom'))
+    const privateSessionIds = normalizedSessionIds.filter(sessionId => !sessionId.endsWith('@chatroom'))
+
+    let memberCountMap: Record<string, number> = {}
+    if (groupSessionIds.length > 0) {
+      try {
+        const memberCountsResult = await wcdbService.getGroupMemberCounts(groupSessionIds)
+        memberCountMap = memberCountsResult.success && memberCountsResult.map ? memberCountsResult.map : {}
+      } catch {
+        memberCountMap = {}
+      }
+    }
+
+    let privateMutualGroupMap: Record<string, number> = {}
+    let groupMutualFriendMap: Record<string, number> = {}
+    if (includeRelations) {
+      let relationGroupSessionIds: string[] = []
+      if (privateSessionIds.length > 0) {
+        const allGroups = await this.listAllGroupSessionIds()
+        relationGroupSessionIds = Array.from(new Set([...allGroups, ...groupSessionIds]))
+      } else if (groupSessionIds.length > 0) {
+        relationGroupSessionIds = groupSessionIds
+      }
+
+      if (relationGroupSessionIds.length > 0) {
+        try {
+          const relation = await this.buildGroupRelationStats(
+            relationGroupSessionIds,
+            privateSessionIds,
+            selfIdentitySet
+          )
+          privateMutualGroupMap = relation.privateMutualGroupMap || {}
+          groupMutualFriendMap = relation.groupMutualFriendMap || {}
+        } catch {
+          privateMutualGroupMap = {}
+          groupMutualFriendMap = {}
+        }
+      }
+    }
+
+    await this.forEachWithConcurrency(normalizedSessionIds, 3, async (sessionId) => {
+      try {
+        const stats = await this.collectSessionExportStats(sessionId, selfIdentitySet)
+        if (sessionId.endsWith('@chatroom')) {
+          stats.groupMemberCount = typeof memberCountMap[sessionId] === 'number'
+            ? Math.max(0, Math.floor(memberCountMap[sessionId]))
+            : 0
+          if (includeRelations) {
+            stats.groupMutualFriends = typeof groupMutualFriendMap[sessionId] === 'number'
+              ? Math.max(0, Math.floor(groupMutualFriendMap[sessionId]))
+              : 0
+          }
+        } else if (includeRelations) {
+          stats.privateMutualGroups = typeof privateMutualGroupMap[sessionId] === 'number'
+            ? Math.max(0, Math.floor(privateMutualGroupMap[sessionId]))
+            : 0
+        }
+        result[sessionId] = stats
+      } catch {
+        result[sessionId] = this.buildEmptyExportSessionStats(sessionId, includeRelations)
+      }
+    })
+
+    return result
   }
 
   private async getOrComputeSessionExportStats(
@@ -4966,9 +5238,16 @@ class ChatService {
       if (pendingSessionIds.length > 0) {
         const myWxid = this.configService.get('myWxid') || ''
         const selfIdentitySet = new Set<string>(this.buildIdentityKeys(myWxid))
-        await this.forEachWithConcurrency(pendingSessionIds, 3, async (sessionId) => {
-          try {
-            const stats = await this.getOrComputeSessionExportStats(sessionId, includeRelations, selfIdentitySet)
+        let usedBatchedCompute = false
+        try {
+          const batchedStatsMap = await this.computeSessionExportStatsBatch(
+            pendingSessionIds,
+            includeRelations,
+            selfIdentitySet
+          )
+          for (const sessionId of pendingSessionIds) {
+            const stats = batchedStatsMap[sessionId]
+            if (!stats) continue
             resultMap[sessionId] = stats
             const updatedAt = this.setSessionStatsCacheEntry(sessionId, stats, includeRelations)
             cacheMeta[sessionId] = {
@@ -4977,10 +5256,29 @@ class ChatService {
               includeRelations,
               source: 'fresh'
             }
-          } catch {
-            resultMap[sessionId] = this.buildEmptyExportSessionStats(sessionId, includeRelations)
           }
-        })
+          usedBatchedCompute = true
+        } catch {
+          usedBatchedCompute = false
+        }
+
+        if (!usedBatchedCompute) {
+          await this.forEachWithConcurrency(pendingSessionIds, 3, async (sessionId) => {
+            try {
+              const stats = await this.getOrComputeSessionExportStats(sessionId, includeRelations, selfIdentitySet)
+              resultMap[sessionId] = stats
+              const updatedAt = this.setSessionStatsCacheEntry(sessionId, stats, includeRelations)
+              cacheMeta[sessionId] = {
+                updatedAt,
+                stale: false,
+                includeRelations,
+                source: 'fresh'
+              }
+            } catch {
+              resultMap[sessionId] = this.buildEmptyExportSessionStats(sessionId, includeRelations)
+            }
+          })
+        }
       }
 
       const response: {

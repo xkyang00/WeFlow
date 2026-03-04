@@ -457,14 +457,6 @@ const matchesContactTab = (contact: ContactInfo, tab: ConversationTab): boolean 
   return contact.type === 'former_friend'
 }
 
-const getContactTypeName = (type: ContactInfo['type']): string => {
-  if (type === 'friend') return '好友'
-  if (type === 'group') return '群聊'
-  if (type === 'official') return '公众号'
-  if (type === 'former_friend') return '曾经的好友'
-  return '其他'
-}
-
 const createTaskId = (): string => `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 const createExportDiagTraceId = (): string => `export-card-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 const CONTACT_ENRICH_TIMEOUT_MS = 7000
@@ -3971,9 +3963,6 @@ function ExportPage() {
                           <div className="contact-info">
                             <div className="contact-name">{contact.displayName}</div>
                             <div className="contact-remark">{contact.username}</div>
-                          </div>
-                          <div className={`contact-type ${contact.type}`}>
-                            <span>{getContactTypeName(contact.type)}</span>
                           </div>
                           <div className="row-message-count">
                             <span className="row-message-count-label">总消息</span>
