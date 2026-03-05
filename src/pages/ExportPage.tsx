@@ -1061,7 +1061,7 @@ function ExportPage() {
   const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set())
   const [contactsList, setContactsList] = useState<ContactInfo[]>([])
   const [isContactsListLoading, setIsContactsListLoading] = useState(true)
-  const [contactsDataSource, setContactsDataSource] = useState<ContactsDataSource>(null)
+  const [, setContactsDataSource] = useState<ContactsDataSource>(null)
   const [contactsUpdatedAt, setContactsUpdatedAt] = useState<number | null>(null)
   const [avatarCacheUpdatedAt, setAvatarCacheUpdatedAt] = useState<number | null>(null)
   const [sessionMessageCounts, setSessionMessageCounts] = useState<Record<string, number>>({})
@@ -3335,22 +3335,6 @@ function ExportPage() {
     }
   }, [])
 
-  const contactsUpdatedAtLabel = useMemo(() => {
-    if (!contactsUpdatedAt) return ''
-    return new Date(contactsUpdatedAt).toLocaleString()
-  }, [contactsUpdatedAt])
-
-  const avatarCacheUpdatedAtLabel = useMemo(() => {
-    if (!avatarCacheUpdatedAt) return ''
-    return new Date(avatarCacheUpdatedAt).toLocaleString()
-  }, [avatarCacheUpdatedAt])
-
-  const contactsAvatarCachedCount = useMemo(() => {
-    return contactsList.reduce((count, contact) => (
-      contact.avatarUrl ? count + 1 : count
-    ), 0)
-  }, [contactsList])
-
   const contactsIssueElapsedMs = useMemo(() => {
     if (!contactsLoadIssue) return 0
     if (isContactsListLoading && contactsLoadSession) {
@@ -3874,32 +3858,6 @@ function ExportPage() {
               刷新
             </button>
           </div>
-        </div>
-
-        <div className="table-cache-meta">
-          <span className="meta-item">
-            共 {filteredContacts.length} / {contactsList.length} 个联系人
-          </span>
-          {contactsUpdatedAt && (
-            <span className="meta-item">
-              {contactsDataSource === 'cache' ? '缓存' : '最新'} · 更新于 {contactsUpdatedAtLabel}
-            </span>
-          )}
-          {contactsList.length > 0 && (
-            <span className="meta-item">
-              头像缓存 {contactsAvatarCachedCount}/{contactsList.length}
-              {avatarCacheUpdatedAtLabel ? ` · 更新于 ${avatarCacheUpdatedAtLabel}` : ''}
-            </span>
-          )}
-          {isContactsListLoading && contactsList.length > 0 && (
-            <span className="meta-item syncing">后台同步中...</span>
-          )}
-          {isLoadingSessionCounts && (
-            <span className="meta-item syncing">
-              <Loader2 size={12} className="spin" />
-              消息总数统计中…
-            </span>
-          )}
         </div>
 
         {contactsList.length > 0 && isContactsListLoading && (

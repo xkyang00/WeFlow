@@ -63,7 +63,7 @@
 .section-info-popover {
   position: absolute;
   top: calc(100% + 8px);
-  right: 0;
+  left: 0;
   width: min(340px, calc(100vw - 40px));
   border-radius: 10px;
   border: 1px solid var(--border-color);
