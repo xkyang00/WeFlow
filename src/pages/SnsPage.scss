@@ -11,7 +11,8 @@
 
 .sns-page-layout {
     display: flex;
-    height: 100%;
+    height: calc(100% + 48px);
+    margin: -24px;
     overflow: hidden;
     background: var(--sns-bg-color);
     position: relative;
@@ -32,7 +33,7 @@
 .sns-feed-container {
     width: 100%;
     max-width: var(--sns-max-width);
-    padding: 20px 24px 60px 24px;
+    padding: 20px 24px 16px 24px;
     display: flex;
     flex-direction: column;
     gap: 0;
