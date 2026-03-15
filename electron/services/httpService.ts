@@ -798,6 +798,20 @@ class HttpService {
     return 0
   }
 
+  private normalizeAccountId(value: string): string {
+    const trimmed = String(value || '').trim()
+    if (!trimmed) return trimmed
+
+    if (trimmed.toLowerCase().startsWith('wxid_')) {
+      const match = trimmed.match(/^(wxid_[^_]+)/i)
+      if (match) return match[1]
+      return trimmed
+    }
+
+    const suffixMatch = trimmed.match(/^(.+)_([a-zA-Z0-9]{4})$/)
+    return suffixMatch ? suffixMatch[1] : trimmed
+  }
+
   /**
    * 获取显示名称
    */
@@ -812,6 +826,62 @@ class HttpService {
     }
     // 返回空对象，调用方会使用 username 作为备用
     return {}
+  }
+
+  private async getAvatarUrls(usernames: string[]): Promise<Record<string, string>> {
+    const lookupUsernames = Array.from(new Set(
+      usernames.flatMap((username) => {
+        const normalized = String(username || '').trim()
+        if (!normalized) return []
+        const cleaned = this.normalizeAccountId(normalized)
+        return cleaned && cleaned !== normalized ? [normalized, cleaned] : [normalized]
+      })
+    ))
+
+    if (lookupUsernames.length === 0) return {}
+
+    try {
+      const result = await wcdbService.getAvatarUrls(lookupUsernames)
+      if (result.success && result.map) {
+        const avatarMap: Record<string, string> = {}
+        for (const [username, avatarUrl] of Object.entries(result.map)) {
+          const normalizedUsername = String(username || '').trim()
+          const normalizedAvatarUrl = String(avatarUrl || '').trim()
+          if (!normalizedUsername || !normalizedAvatarUrl) continue
+
+          avatarMap[normalizedUsername] = normalizedAvatarUrl
+          avatarMap[normalizedUsername.toLowerCase()] = normalizedAvatarUrl
+
+          const cleaned = this.normalizeAccountId(normalizedUsername)
+          if (cleaned) {
+            avatarMap[cleaned] = normalizedAvatarUrl
+            avatarMap[cleaned.toLowerCase()] = normalizedAvatarUrl
+          }
+        }
+        return avatarMap
+      }
+    } catch (e) {
+      console.error('[HttpService] Failed to get avatar urls:', e)
+    }
+
+    return {}
+  }
+
+  private resolveAvatarUrl(avatarMap: Record<string, string>, candidates: Array<string | undefined | null>): string | undefined {
+    for (const candidate of candidates) {
+      const normalized = String(candidate || '').trim()
+      if (!normalized) continue
+
+      const cleaned = this.normalizeAccountId(normalized)
+      const avatarUrl = avatarMap[normalized]
+        || avatarMap[normalized.toLowerCase()]
+        || avatarMap[cleaned]
+        || avatarMap[cleaned.toLowerCase()]
+
+      if (avatarUrl) return avatarUrl
+    }
+
+    return undefined
   }
 
   private lookupGroupNickname(groupNicknamesMap: Map<string, string>, sender: string): string {
@@ -868,6 +938,7 @@ class HttpService {
   ): Promise<ChatLabData> {
     const isGroup = talkerId.endsWith('@chatroom')
     const myWxid = this.configService.get('myWxid') || ''
+    const normalizedMyWxid = this.normalizeAccountId(myWxid).toLowerCase()
 
     // 收集所有发送者
     const senderSet = new Set<string>()
@@ -906,6 +977,27 @@ class HttpService {
       }
     }
 
+    const [memberAvatarMap, myAvatarResult, sessionAvatarInfo] = await Promise.all([
+      this.getAvatarUrls(Array.from(memberMap.keys()).filter((sender) => !sender.startsWith('unknown_sender_'))),
+      myWxid
+        ? chatService.getMyAvatarUrl()
+        : Promise.resolve<{ success: boolean; avatarUrl?: string }>({ success: true }),
+      isGroup ? chatService.getContactAvatar(talkerId) : Promise.resolve(null)
+    ])
+
+    for (const [sender, member] of memberMap.entries()) {
+      if (sender.startsWith('unknown_sender_')) continue
+
+      const normalizedSender = this.normalizeAccountId(sender).toLowerCase()
+      const isSelfMember = Boolean(normalizedMyWxid && normalizedSender && normalizedSender === normalizedMyWxid)
+      const avatarUrl = (isSelfMember ? myAvatarResult.avatarUrl : undefined)
+        || this.resolveAvatarUrl(memberAvatarMap, isSelfMember ? [sender, myWxid] : [sender])
+
+      if (avatarUrl) {
+        member.avatar = avatarUrl
+      }
+    }
+
     // 转换消息
     const chatLabMessages: ChatLabMessage[] = messages.map(msg => {
       const senderInfo = this.resolveChatLabSenderInfo(msg, talkerId, talkerName, myWxid, isGroup, senderNames, groupNicknamesMap)
@@ -933,6 +1025,7 @@ class HttpService {
         platform: 'wechat',
         type: isGroup ? 'group' : 'private',
         groupId: isGroup ? talkerId : undefined,
+        groupAvatar: isGroup ? sessionAvatarInfo?.avatarUrl : undefined,
         ownerId: myWxid || undefined
       },
       members: Array.from(memberMap.values()),
