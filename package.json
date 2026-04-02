@@ -34,7 +34,7 @@
     "jieba-wasm": "^2.2.0",
     "jszip": "^3.10.1",
     "koffi": "^2.9.0",
-    "lucide-react": "^0.562.0",
+    "lucide-react": "^1.7.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "react-markdown": "^10.1.0",
@@ -56,7 +56,7 @@
     "electron-builder": "^26.8.1",
     "sass": "^1.98.0",
     "sharp": "^0.34.5",
-    "typescript": "^5.6.3",
+    "typescript": "^6.0.2",
     "vite": "^7.0.0",
     "vite-plugin-electron": "^0.28.8",
     "vite-plugin-electron-renderer": "^0.14.6"
@@ -102,7 +102,25 @@
       "target": [
         "nsis"
       ],
-      "icon": "public/icon.ico"
+      "icon": "public/icon.ico",
+      "extraFiles": [
+        {
+          "from": "resources/msvcp140.dll",
+          "to": "."
+        },
+        {
+          "from": "resources/msvcp140_1.dll",
+          "to": "."
+        },
+        {
+          "from": "resources/vcruntime140.dll",
+          "to": "."
+        },
+        {
+          "from": "resources/vcruntime140_1.dll",
+          "to": "."
+        }
+      ]
     },
     "linux": {
       "icon": "public/icon.png",
@@ -169,24 +187,6 @@
       "node_modules/sherpa-onnx-*/*",
       "node_modules/sherpa-onnx-*/**/*",
       "node_modules/ffmpeg-static/**/*"
-    ],
-    "extraFiles": [
-      {
-        "from": "resources/msvcp140.dll",
-        "to": "."
-      },
-      {
-        "from": "resources/msvcp140_1.dll",
-        "to": "."
-      },
-      {
-        "from": "resources/vcruntime140.dll",
-        "to": "."
-      },
-      {
-        "from": "resources/vcruntime140_1.dll",
-        "to": "."
-      }
     ],
     "icon": "resources/icon.icns"
   },
