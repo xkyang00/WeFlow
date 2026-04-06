@@ -85,6 +85,14 @@ interface ConfigSchema {
   aiInsightScanIntervalHours: number
   /** 发送上下文时的最大消息条数 */
   aiInsightContextCount: number
+  /** 自定义 system prompt，空字符串表示使用内置默认值 */
+  aiInsightSystemPrompt: string
+  /** 是否启用 Telegram 推送 */
+  aiInsightTelegramEnabled: boolean
+  /** Telegram Bot Token */
+  aiInsightTelegramToken: string
+  /** Telegram 接收 Chat ID，逗号分隔，支持多个 */
+  aiInsightTelegramChatIds: string
 }
 
 // 需要 safeStorage 加密的字段（普通模式）
@@ -169,7 +177,11 @@ export class ConfigService {
       aiInsightWhitelist: [],
       aiInsightCooldownMinutes: 120,
       aiInsightScanIntervalHours: 4,
-      aiInsightContextCount: 40
+      aiInsightContextCount: 40,
+      aiInsightSystemPrompt: '',
+      aiInsightTelegramEnabled: false,
+      aiInsightTelegramToken: '',
+      aiInsightTelegramChatIds: ''
     }
 
     const storeOptions: any = {

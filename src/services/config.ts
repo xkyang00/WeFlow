@@ -92,7 +92,11 @@ export const CONFIG_KEYS = {
   AI_INSIGHT_WHITELIST: 'aiInsightWhitelist',
   AI_INSIGHT_COOLDOWN_MINUTES: 'aiInsightCooldownMinutes',
   AI_INSIGHT_SCAN_INTERVAL_HOURS: 'aiInsightScanIntervalHours',
-  AI_INSIGHT_CONTEXT_COUNT: 'aiInsightContextCount'
+  AI_INSIGHT_CONTEXT_COUNT: 'aiInsightContextCount',
+  AI_INSIGHT_SYSTEM_PROMPT: 'aiInsightSystemPrompt',
+  AI_INSIGHT_TELEGRAM_ENABLED: 'aiInsightTelegramEnabled',
+  AI_INSIGHT_TELEGRAM_TOKEN: 'aiInsightTelegramToken',
+  AI_INSIGHT_TELEGRAM_CHAT_IDS: 'aiInsightTelegramChatIds'
 } as const
 
 export interface WxidConfig {
@@ -1664,4 +1668,40 @@ export async function getAiInsightContextCount(): Promise<number> {
 
 export async function setAiInsightContextCount(count: number): Promise<void> {
   await config.set(CONFIG_KEYS.AI_INSIGHT_CONTEXT_COUNT, count)
+}
+
+export async function getAiInsightSystemPrompt(): Promise<string> {
+  const value = await config.get(CONFIG_KEYS.AI_INSIGHT_SYSTEM_PROMPT)
+  return typeof value === 'string' ? value : ''
+}
+
+export async function setAiInsightSystemPrompt(prompt: string): Promise<void> {
+  await config.set(CONFIG_KEYS.AI_INSIGHT_SYSTEM_PROMPT, prompt)
+}
+
+export async function getAiInsightTelegramEnabled(): Promise<boolean> {
+  const value = await config.get(CONFIG_KEYS.AI_INSIGHT_TELEGRAM_ENABLED)
+  return value === true
+}
+
+export async function setAiInsightTelegramEnabled(enabled: boolean): Promise<void> {
+  await config.set(CONFIG_KEYS.AI_INSIGHT_TELEGRAM_ENABLED, enabled)
+}
+
+export async function getAiInsightTelegramToken(): Promise<string> {
+  const value = await config.get(CONFIG_KEYS.AI_INSIGHT_TELEGRAM_TOKEN)
+  return typeof value === 'string' ? value : ''
+}
+
+export async function setAiInsightTelegramToken(token: string): Promise<void> {
+  await config.set(CONFIG_KEYS.AI_INSIGHT_TELEGRAM_TOKEN, token)
+}
+
+export async function getAiInsightTelegramChatIds(): Promise<string> {
+  const value = await config.get(CONFIG_KEYS.AI_INSIGHT_TELEGRAM_CHAT_IDS)
+  return typeof value === 'string' ? value : ''
+}
+
+export async function setAiInsightTelegramChatIds(chatIds: string): Promise<void> {
+  await config.set(CONFIG_KEYS.AI_INSIGHT_TELEGRAM_CHAT_IDS, chatIds)
 }

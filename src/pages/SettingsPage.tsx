@@ -125,7 +125,7 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
 
     setHttpApiToken(token)
     await configService.setHttpApiToken(token)
-    showMessage('已生成并保存新的 Access Token', true)
+    showMessage('已生成��保存新的 Access Token', true)
   }
 
   const clearApiToken = async () => {
@@ -233,6 +233,10 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
   const [aiInsightCooldownMinutes, setAiInsightCooldownMinutes] = useState(120)
   const [aiInsightScanIntervalHours, setAiInsightScanIntervalHours] = useState(4)
   const [aiInsightContextCount, setAiInsightContextCount] = useState(40)
+  const [aiInsightSystemPrompt, setAiInsightSystemPrompt] = useState('')
+  const [aiInsightTelegramEnabled, setAiInsightTelegramEnabled] = useState(false)
+  const [aiInsightTelegramToken, setAiInsightTelegramToken] = useState('')
+  const [aiInsightTelegramChatIds, setAiInsightTelegramChatIds] = useState('')
 
   const [isWayland, setIsWayland] = useState(false)
   useEffect(() => {
@@ -471,6 +475,10 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
   const savedAiInsightCooldownMinutes = await configService.getAiInsightCooldownMinutes()
   const savedAiInsightScanIntervalHours = await configService.getAiInsightScanIntervalHours()
   const savedAiInsightContextCount = await configService.getAiInsightContextCount()
+  const savedAiInsightSystemPrompt = await configService.getAiInsightSystemPrompt()
+  const savedAiInsightTelegramEnabled = await configService.getAiInsightTelegramEnabled()
+  const savedAiInsightTelegramToken = await configService.getAiInsightTelegramToken()
+  const savedAiInsightTelegramChatIds = await configService.getAiInsightTelegramChatIds()
   setAiInsightEnabled(savedAiInsightEnabled)
   setAiInsightApiBaseUrl(savedAiInsightApiBaseUrl)
   setAiInsightApiKey(savedAiInsightApiKey)
@@ -482,6 +490,10 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
   setAiInsightCooldownMinutes(savedAiInsightCooldownMinutes)
   setAiInsightScanIntervalHours(savedAiInsightScanIntervalHours)
   setAiInsightContextCount(savedAiInsightContextCount)
+  setAiInsightSystemPrompt(savedAiInsightSystemPrompt)
+  setAiInsightTelegramEnabled(savedAiInsightTelegramEnabled)
+  setAiInsightTelegramToken(savedAiInsightTelegramToken)
+  setAiInsightTelegramChatIds(savedAiInsightTelegramChatIds)
 
     } catch (e: any) {
       console.error('加载配置失败:', e)
@@ -1660,7 +1672,7 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
       <div className="tab-content">
         <div className="form-group">
           <label>新消息通知</label>
-          <span className="form-hint">开启后，收到新消息时将显示桌面弹窗通知</span>
+          <span className="form-hint">开启后，收���新消息时将显示桌面弹窗通知</span>
           <div className="log-toggle-line">
             <span className="log-status">{notificationEnabled ? '已开启' : '已关闭'}</span>
             <label className="switch" htmlFor="notification-enabled-toggle">
@@ -2800,6 +2812,111 @@ function SettingsPage({ onClose }: SettingsPageProps = {}) {
             style={{ width: 100 }}
           />
         </div>
+      )}
+
+      <div className="divider" />
+
+      {/* 自定义 System Prompt */}
+      {(() => {
+        const DEFAULT_SYSTEM_PROMPT = `你是用户的私人关系观察助手，名叫"见解"。你的任务是主动提供有价值的观察和建议。
+
+要求：
+1. 必须给出见解。基于聊天记录分析对方情绪、话题趋势、关系动态，或给出回复建议、聊天话题推荐。
+2. 控制在 80 字以内，直接、具体、一针见血。不要废话。
+3. 输出纯文本，不使用 Markdown。
+4. 只有在完全没有任何可说的内容时（比如对话只有一条"嗯"），才回复"SKIP"。绝大多数情况下你应该输出见解。`
+        return (
+          <div className="form-group">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <label style={{ marginBottom: 0 }}>自定义 AI 见解提示词</label>
+              <button
+                className="button-secondary"
+                style={{ fontSize: 12, padding: '3px 10px' }}
+                onClick={async () => {
+                  setAiInsightSystemPrompt('')
+                  await configService.setAiInsightSystemPrompt('')
+                }}
+              >
+                恢复默认
+              </button>
+            </div>
+            <span className="form-hint">
+              留空则使用内置默认提示词。修改后立即生效，无需重启。可变的统计信息（触发次数、对话内容）会自动附加在用户消息里，无需在此填写。
+            </span>
+            <textarea
+              className="field-input"
+              rows={8}
+              style={{ width: '100%', resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }}
+              placeholder={DEFAULT_SYSTEM_PROMPT}
+              value={aiInsightSystemPrompt}
+              onChange={(e) => {
+                const val = e.target.value
+                setAiInsightSystemPrompt(val)
+                scheduleConfigSave('aiInsightSystemPrompt', () => configService.setAiInsightSystemPrompt(val))
+              }}
+            />
+          </div>
+        )
+      })()}
+
+      <div className="divider" />
+
+      {/* Telegram 推送 */}
+      <div className="form-group">
+        <label>Telegram Bot 推送</label>
+        <span className="form-hint">
+          开启后，见解同时推送到指定 Telegram 用户/群组，方便手机即时收到通知。需要先创建 Bot 并获取 Token（通过 @BotFather），Chat ID 可通过 @userinfobot 获取，多个 ID 用英文逗号分隔。
+        </span>
+        <div className="log-toggle-line">
+          <span className="log-status">{aiInsightTelegramEnabled ? '已启用' : '未启用'}</span>
+          <label className="switch">
+            <input
+              type="checkbox"
+              checked={aiInsightTelegramEnabled}
+              onChange={async (e) => {
+                const val = e.target.checked
+                setAiInsightTelegramEnabled(val)
+                await configService.setAiInsightTelegramEnabled(val)
+              }}
+            />
+            <span className="switch-slider" />
+          </label>
+        </div>
+      </div>
+
+      {aiInsightTelegramEnabled && (
+        <>
+          <div className="form-group">
+            <label>Bot Token</label>
+            <input
+              type="password"
+              className="field-input"
+              style={{ width: '100%' }}
+              placeholder="110201543:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw"
+              value={aiInsightTelegramToken}
+              onChange={(e) => {
+                const val = e.target.value
+                setAiInsightTelegramToken(val)
+                scheduleConfigSave('aiInsightTelegramToken', () => configService.setAiInsightTelegramToken(val))
+              }}
+            />
+          </div>
+          <div className="form-group">
+            <label>Chat ID（支持英文逗号分隔多个）</label>
+            <input
+              type="text"
+              className="field-input"
+              style={{ width: '100%' }}
+              placeholder="123456789, -987654321"
+              value={aiInsightTelegramChatIds}
+              onChange={(e) => {
+                const val = e.target.value
+                setAiInsightTelegramChatIds(val)
+                scheduleConfigSave('aiInsightTelegramChatIds', () => configService.setAiInsightTelegramChatIds(val))
+              }}
+            />
+          </div>
+        </>
       )}
 
       <div className="divider" />

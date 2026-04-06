@@ -413,7 +413,7 @@ class InsightService {
   }
 
   /**
-   * 获取今日全局已触发次数（所有会话合计），用于 prompt 中告知模型全局上下文。
+   * 获取今日全局已触发次数（所有会话合计），用于 prompt 中告知模���全局上下文。
    */
   private getTodayTotalTriggerCount(): number {
     this.resetIfNewDay()
@@ -611,7 +611,7 @@ class InsightService {
       return
     }
 
-    // ── 构建 prompt ─────────────���────────────────────────────────────────────
+    // ── 构建 prompt ─────────────���───────────────────────────────���────────────
 
     // 今日触发统计（让模型具备时间与克制感）
     const sessionTriggerTimes = this.recordTrigger(sessionId)
@@ -637,6 +637,21 @@ class InsightService {
       }
     }
 
+    // ── 默认 system prompt（稳定内容，有利于 provider 端 prompt cache 命中）────
+    const DEFAULT_SYSTEM_PROMPT = `你是用户的私人关系观察助手，名叫"见解"。你的任务是主动提供有价值的观察和建议。
+
+要求：
+1. 必须给出见解。基于聊天记录分析对方情绪、话题趋势、关系动态，或给出回复建议、聊天话题推荐。
+2. 控制在 80 字以内，直接、具体、一针见血。不要废话。
+3. 输出纯文本，不使用 Markdown。
+4. 只有在完全没有任何可说的内容时（比如对话只有一条"嗯"），才回复"SKIP"。绝大多数情况下你应该输出见解。`
+
+    // 优先使用用户自定义 prompt，为空则使用默认值
+    const customPrompt = (this.config.get('aiInsightSystemPrompt') as string) || ''
+    const systemPrompt = customPrompt.trim() || DEFAULT_SYSTEM_PROMPT
+
+    // 可变的上下文统计信息放在 user message 里，保持 system prompt 稳定不变
+    // 这样 provider 端（Anthropic/OpenAI）能最大化命中 prompt cache，降低费用
     const triggerDesc =
       triggerReason === 'silence'
         ? `你已经 ${silentDays} 天没有和「${displayName}」聊天了。`
@@ -644,22 +659,13 @@ class InsightService {
 
     const todayStatsDesc =
       sessionTriggerTimes.length > 1
-        ? `今天你已经针对「${displayName}」收到过 ${sessionTriggerTimes.length - 1} 条见解（时间：${sessionTriggerTimes.slice(0, -1).join('、')}），请适当克制，避免过度打扰。`
+        ? `今天你已经针对「${displayName}」收到过 ${sessionTriggerTimes.length - 1} 条见解（时间：${sessionTriggerTimes.slice(0, -1).join('、')}），请适当克制。`
         : `今天你还没有针对「${displayName}」发出过见解。`
 
     const globalStatsDesc = `今天全部联系人合计已触发 ${totalTodayTriggers} 条见解。`
 
-    const systemPrompt = `你是用户的私人关系观察助手，名叫"见解"。你的任务是主动提供有价值的观察和建议。
-
-要求：
-1. 必须给出见解。基于聊天记录分析对方情绪、话题趋势、关系动态，或给出回复建议、聊天话题推荐。
-2. 控制在 80 字以内，直接、具体、一针见血。不要废话。
-3. 输出纯文本，不使用 Markdown。
-4. 只有在完全没有任何可说的内容时（比如对话只有一条"嗯"），才回复"SKIP"。绝大多数情况下你应该输出见解。
-
-时间感知：${todayStatsDesc} ${globalStatsDesc}`
-
-    const userPrompt = `触发原因：${triggerDesc}${contextSection}
+    const userPrompt = `触发原因：${triggerDesc}
+时间统计：${todayStatsDesc} ${globalStatsDesc}${contextSection}
 
 请给出你的见解（≤80字）：`
 
@@ -686,25 +692,79 @@ class InsightService {
       }
 
       const insight = result.slice(0, 120)
+      const notifTitle = `见解 · ${displayName}`
 
       insightLog('INFO', `推送通知 → ${displayName}: ${insight}`)
 
-      // 使用 Electron 原生系统通知，确保 Windows 右下角弹窗可靠显示
+      // 渠道一：Electron 原生系统通知
       if (Notification.isSupported()) {
-        const notif = new Notification({
-          title: `见解 · ${displayName}`,
-          body: insight,
-          silent: false
-        })
+        const notif = new Notification({ title: notifTitle, body: insight, silent: false })
         notif.show()
       } else {
         insightLog('WARN', '当前系统不支持原生通知')
+      }
+
+      // 渠道二：Telegram Bot 推送（可选）
+      const telegramEnabled = this.config.get('aiInsightTelegramEnabled') as boolean
+      if (telegramEnabled) {
+        const telegramToken = (this.config.get('aiInsightTelegramToken') as string) || ''
+        const telegramChatIds = (this.config.get('aiInsightTelegramChatIds') as string) || ''
+        if (telegramToken && telegramChatIds) {
+          const chatIds = telegramChatIds.split(',').map((s) => s.trim()).filter(Boolean)
+          for (const chatId of chatIds) {
+            this.sendTelegram(telegramToken, chatId, `${notifTitle}\n\n${insight}`).catch((e) => {
+              insightLog('WARN', `Telegram 推送失败 (chatId=${chatId}): ${(e as Error).message}`)
+            })
+          }
+        } else {
+          insightLog('WARN', 'Telegram 已启用但 Token 或 Chat ID 未填写，跳过')
+        }
       }
 
       insightLog('INFO', `已为 ${displayName} 推送见解`)
     } catch (e) {
       insightLog('ERROR', `API 调用失败 (${displayName}): ${(e as Error).message}`)
     }
+  }
+
+  /**
+   * 通过 Telegram Bot API 发送消息。
+   * 使用 Node 原生 https 模块，无需第三方依赖。
+   */
+  private sendTelegram(token: string, chatId: string, text: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const body = JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' })
+      const options = {
+        hostname: 'api.telegram.org',
+        port: 443,
+        path: `/bot${token}/sendMessage`,
+        method: 'POST' as const,
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body).toString()
+        }
+      }
+      const req = https.request(options, (res) => {
+        let data = ''
+        res.on('data', (chunk) => { data += chunk })
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data)
+            if (parsed.ok) {
+              resolve()
+            } else {
+              reject(new Error(parsed.description || '未知错误'))
+            }
+          } catch {
+            reject(new Error(`响应解析失败: ${data.slice(0, 100)}`))
+          }
+        })
+      })
+      req.setTimeout(15_000, () => { req.destroy(); reject(new Error('Telegram 请求超时')) })
+      req.on('error', reject)
+      req.write(body)
+      req.end()
+    })
   }
 }
 
